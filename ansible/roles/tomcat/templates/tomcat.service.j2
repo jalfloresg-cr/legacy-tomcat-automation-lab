@@ -1,0 +1,24 @@
+[Unit]
+Description=Apache Tomcat
+After=network.target
+
+[Service]
+Type=simple
+
+User={{ tomcat_user }}
+Group={{ tomcat_group }}
+
+Environment="JAVA_HOME={{ tomcat_java_home }}"
+Environment="CATALINA_HOME={{ tomcat_current_dir }}"
+Environment="CATALINA_BASE={{ tomcat_current_dir }}"
+
+ExecStart={{ tomcat_current_dir }}/bin/catalina.sh run
+ExecStop={{ tomcat_current_dir }}/bin/catalina.sh stop
+
+Restart=on-failure
+RestartSec=5
+
+SuccessExitStatus=143
+
+[Install]
+WantedBy=multi-user.target

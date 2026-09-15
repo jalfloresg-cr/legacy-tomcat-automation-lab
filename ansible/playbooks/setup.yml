@@ -1,0 +1,15 @@
+---
+- name: Configure legacy application servers
+  hosts: app_servers
+  become: true
+
+  roles:
+    - java
+
+- name: Configure legacy application servers
+  hosts: app_servers
+  become: true
+
+  roles:
+    - java
+    - tomcat    

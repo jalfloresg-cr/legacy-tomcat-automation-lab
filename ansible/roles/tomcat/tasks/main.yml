@@ -1,0 +1,74 @@
+---
+- name: Create Tomcat group
+  ansible.builtin.group:
+    name: "{{ tomcat_group }}"
+    state: present
+
+- name: Create Tomcat user
+  ansible.builtin.user:
+    name: "{{ tomcat_user }}"
+    group: "{{ tomcat_group }}"
+    home: "{{ tomcat_root }}"
+    shell: /usr/sbin/nologin
+    system: true
+    create_home: false
+
+- name: Create Tomcat root directory
+  ansible.builtin.file:
+    path: "{{ tomcat_root }}"
+    state: directory
+    owner: "{{ tomcat_user }}"
+    group: "{{ tomcat_group }}"
+    mode: "0755"
+
+- name: Download Tomcat archive
+  ansible.builtin.get_url:
+    url: "{{ tomcat_archive_url }}"
+    dest: "/tmp/{{ tomcat_archive_name }}"
+    checksum: "sha512:{{ tomcat_checksum_url }}"
+    mode: "0644"
+
+- name: Extract Tomcat
+  ansible.builtin.unarchive:
+    src: "/tmp/{{ tomcat_archive_name }}"
+    dest: "{{ tomcat_root }}"
+    remote_src: true
+    owner: "{{ tomcat_user }}"
+    group: "{{ tomcat_group }}"
+    creates: "{{ tomcat_install_dir }}/bin/catalina.sh"
+
+- name: Create current Tomcat symlink
+  ansible.builtin.file:
+    src: "{{ tomcat_install_dir }}"
+    dest: "{{ tomcat_current_dir }}"
+    state: link
+    force: true
+    owner: "{{ tomcat_user }}"
+    group: "{{ tomcat_group }}"
+  notify: restart tomcat
+
+- name: Resolve Java binary
+  ansible.builtin.command:
+    cmd: readlink -f /usr/bin/java
+  register: java_binary
+  changed_when: false
+
+- name: Set Java home
+  ansible.builtin.set_fact:
+    tomcat_java_home: "{{ java_binary.stdout | dirname | dirname }}"              
+
+- name: Install Tomcat systemd service
+  ansible.builtin.template:
+    src: tomcat.service.j2
+    dest: /etc/systemd/system/tomcat.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: restart tomcat
+
+- name: Enable and start Tomcat
+  ansible.builtin.systemd:
+    name: tomcat
+    enabled: true
+    state: started
+    daemon_reload: true    

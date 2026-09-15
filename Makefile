@@ -71,3 +71,9 @@ ansible-ping:
 		-i $(ANSIBLE_INVENTORY) \
 		app_servers \
 		-m ping
+		
+java-version:
+	ansible \
+		-i $(ANSIBLE_INVENTORY) \
+		app_servers \
+		-a "java -version"		
