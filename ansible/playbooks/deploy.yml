@@ -1,0 +1,18 @@
+---
+- name: Deploy legacy Tomcat application
+  hosts: app_servers
+  become: true
+
+  pre_tasks:
+    - name: Validate deployment parameters
+      ansible.builtin.assert:
+        that:
+          - app_version | default('') | length > 0
+          - config_version | default('') | length > 0
+          - app_environment | default('') | length > 0
+        fail_msg: >-
+          app_version, config_version and app_environment
+          must be provided.
+
+  roles:
+    - application

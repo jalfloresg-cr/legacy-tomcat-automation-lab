@@ -1,73 +1,68 @@
 # Legacy Tomcat Automation Lab
 
-Local lab for modernizing a traditional Java/Tomcat deployment workflow without requiring the application to be containerized or redesigned.
+A local lab for modernizing the delivery of a traditional Java WAR running on Apache Tomcat without requiring the application to be containerized or redesigned.
 
-The project separates infrastructure provisioning, server bootstrap, configuration management, application configuration, secrets, and application deployment.
+The project separates infrastructure provisioning, first-boot bootstrap, server configuration, CI/CD, application artifacts, external configuration, secrets, and deployment.
+
+> Legacy application does not have to mean legacy delivery process.
 
 ## Architecture
 
 ```text
-Developer
-   |
-   +--> Application Repository
-   |        |
-   |        +--> Build WAR
-   |        +--> Publish versioned artifact
-   |                         |
-   |                         v
-   |                        S3
-   |
-   +--> Configuration Repository
-            |
-            +--> Versioned application.properties.j2
-                              |
-                              v
-
-                         Deployment Pipeline
-                              |
-                              v
-                           Ansible
-                          /       \
-                         /         \
-                  WAR from S3   Config from Git
-                         \         /
-                          \       /
-                       Resolve Secrets
-                              |
-                              v
-                       Render Properties
-                              |
-                              v
-                         Tomcat Server
+Application Repository --tag--> Gitea Actions --WAR + SHA256--------+
+                                                                    |
+Configuration Repository --tag--> Gitea Actions --config + SHA256---+--> LocalStack S3
+                                                                    |
+                                                                    v
+                                                            Ansible Controller
+                                                               /         \
+                                                              /           \
+                                                        S3 artifacts   Secrets Manager
+                                                              \           /
+                                                               \         /
+                                                                v       v
+                                                            Verify + Render
+                                                                  |
+                                                                  v
+                                                            Tomcat Server
+                                                                  |
+                                                                  v
+                                                         /actuator/health
+                                                                  |
+                                                                  v
+                                                                 UP
 ```
 
 ## Design Principles
 
-1. **Terraform provisions infrastructure only when infrastructure must be created.**
-2. **Ansible configures and deploys to any reachable Linux server.**
-3. **Application artifacts and application configuration are versioned independently.**
-4. **Secrets are resolved at deployment time and are not stored in Git.**
-
-This allows the same Ansible automation to work with the local lab or with infrastructure that already exists.
+1. **Terraform is optional for existing infrastructure.** It provisions the local lab, but Ansible can target any reachable Linux server.
+2. **cloud-init performs only minimal bootstrap.**
+3. **Ansible owns server configuration and application deployment.**
+4. **Application and configuration releases are independently versioned.**
+5. **CI creates immutable release artifacts; it does not deploy them.**
+6. **Artifacts are verified with SHA-256 before deployment.**
+7. **Secrets are resolved at deployment time and are not stored in Git or release artifacts.**
+8. **Tomcat is stopped only when the WAR changes and restarted only when configuration/runtime settings require it.**
+9. **Repeated deployment of the same desired state is idempotent.**
 
 ## Infrastructure Modes
 
-### Provisioned lab
+### Provisioned local lab
 
 ```text
 Terraform
    |
-   +--> LocalStack
-   |      +--> S3
-   |      +--> Secrets Manager
+   +--> Docker
+   |     +--> LocalStack
+   |     +--> Gitea
+   |     +--> Gitea Actions Runner
    |
-   +--> Multipass VM
+   +--> Multipass compute module
           |
-          v
-     Generated Inventory
-          |
-          v
-       Ansible
+          +--> Ubuntu 24.04 VM
+                 |
+                 +--> cloud-init
+                 +--> generated Ansible inventory
 ```
 
 ### Existing infrastructure
@@ -82,11 +77,9 @@ Existing EC2 / Azure VM / VMware / Physical Server
                       Ansible
 ```
 
-Terraform is optional when the servers already exist.
+Terraform can be skipped when infrastructure already exists.
 
 ## Compute Abstraction
-
-The local compute implementation is isolated behind a Terraform module.
 
 ```text
 Root Terraform
@@ -106,83 +99,46 @@ ssh_user
 ssh_port
      |
      v
-Ansible
+Ansible inventory
 ```
 
-Ansible does not need to know whether the target is Multipass, EC2, Azure VM, VMware, or another Linux server reachable through SSH.
+Ansible does not need to know which infrastructure provider created the server.
 
 ## Tool Responsibilities
 
 ```text
 Terraform
    +--> LocalStack
-   |      +--> S3
-   |      +--> Secrets Manager
-   |
-   +--> Compute module
-          +--> Multipass VM
-                 +--> cloud-init bootstrap
+   +--> S3 bucket
+   +--> Secrets Manager resource
+   +--> Gitea / runner
+   +--> Multipass VM
+   +--> generated inventory
 
 cloud-init
-   +--> Create ansible user
-   +--> Install SSH public key
-   +--> Configure passwordless sudo
-   +--> Install Python 3
+   +--> ansible user
+   +--> SSH key
+   +--> passwordless sudo
+   +--> Python 3
+
+Gitea Actions
+   +--> build/test WAR
+   +--> validate configuration
+   +--> generate SHA-256
+   +--> publish versioned releases to S3
 
 Ansible
    +--> Java 21
-   +--> Apache Tomcat
-   +--> Application directories
-   +--> WAR deployment
-   +--> External configuration
-   +--> Secret resolution
-   +--> Health checks
-   +--> Rollback
+   +--> Apache Tomcat 11
+   +--> artifact downloads
+   +--> SHA-256 validation
+   +--> secret resolution
+   +--> external configuration rendering
+   +--> controlled WAR deployment
+   +--> application work-cache cleanup
+   +--> conditional Tomcat stop/start/restart
+   +--> health checks
 ```
-
-cloud-init only prepares the machine for configuration management. Java, Tomcat, and the application are managed by Ansible.
-
-## Current Status
-
-Completed:
-
-- [x] Terraform initialized
-- [x] Docker provider configured
-- [x] LocalStack running through Docker
-- [x] S3 bucket created: `legacy-artifacts`
-- [x] Secrets Manager enabled
-- [x] Application secret resource created
-- [x] Multipass VM provisioned by Terraform
-- [x] cloud-init bootstrap
-- [x] `ansible` SSH user
-- [x] Passwordless sudo
-- [x] Python 3 available on the VM
-- [x] Ansible installed locally
-- [x] `amazon.aws` collection installed
-- [x] Multipass encapsulated in a Terraform compute module
-- [x] Terraform state migrated without recreating the VM
-- [x] Generated Ansible inventory
-- [x] Existing/manual inventory mode supported
-- [x] Ansible connectivity validated with ping/pong
-- [x] Java 21 installed through Ansible
-- [x] Apache Tomcat 11.0.25 installed from the official binary archive
-- [x] Tomcat configured as a systemd service
-- [x] Tomcat validated running on Java 21
-- [x] Safe execution and idempotency workflow documented
-
-Next:
-
-- [ ] Publish the first versioned WAR to S3
-- [ ] Publish and verify WAR checksum
-- [ ] Create the application deployment role
-- [ ] Checkout versioned configuration from Git
-- [ ] Resolve Secrets Manager values at deployment time
-- [ ] Render `application.properties`
-- [ ] Deploy the WAR to Tomcat
-- [ ] Restart Tomcat only when required
-- [ ] Run application health checks
-- [ ] Add rollback support
-- [ ] Add CI/CD pipeline
 
 ## Repository Structure
 
@@ -190,8 +146,8 @@ Next:
 legacy-tomcat-automation-lab/
 ├── .gitignore
 ├── ansible.cfg
-├── README.md
 ├── Makefile
+├── README.md
 ├── terraform/
 │   ├── .terraform.lock.hcl
 │   ├── versions.tf
@@ -203,43 +159,76 @@ legacy-tomcat-automation-lab/
 │   ├── localstack.tf
 │   ├── s3.tf
 │   ├── secrets.tf
+│   ├── gitea.tf
+│   ├── gitea-runner.tf
 │   ├── templates/
-│   │   └── hosts.ini.tftpl
+│   │   ├── hosts.ini.tftpl
+│   │   └── gitea-runner-config.yaml
 │   └── modules/
 │       └── compute/
 │           └── multipass/
 │               ├── main.tf
 │               ├── variables.tf
 │               ├── outputs.tf
-│               ├── templates/
-│               │   └── cloud-init.yaml.tftpl
-│               └── scripts/
-│                   └── multipass_info.py
+│               ├── templates/cloud-init.yaml.tftpl
+│               └── scripts/multipass_info.py
 └── ansible/
     ├── inventories/
-    │   ├── generated/
-    │   │   └── hosts.ini
-    │   └── examples/
-    │       └── hosts.ini.example
+    │   ├── generated/hosts.ini
+    │   └── examples/hosts.ini.example
     ├── playbooks/
-    │   └── setup.yml
+    │   ├── setup.yml
+    │   └── deploy.yml
     └── roles/
         ├── java/
-        │   └── tasks/main.yml
-        └── tomcat/
+        ├── tomcat/
+        └── application/
             ├── defaults/main.yml
             ├── tasks/main.yml
-            ├── templates/tomcat.service.j2
-            └── handlers/main.yml
+            └── templates/setenv.sh.j2
 ```
 
-Generated files such as the Terraform-produced inventory and rendered cloud-init file are intentionally excluded from Git.
+Generated inventory and rendered bootstrap files are intentionally excluded from Git.
 
-## Ansible Inventory
+## Related Repositories
 
-The lab supports both generated and existing inventories.
+```text
+legacy-tomcat-demo-app
+legacy-tomcat-demo-config
+legacy-tomcat-automation-lab
+```
 
-Terraform-generated inventory:
+The application and configuration repositories are also hosted in local Gitea for the CI/CD portion of the lab.
+
+## Prerequisites
+
+The host requires Terraform, Docker, Multipass, AWS CLI, Git, Python 3, OpenSSH, and Ansible.
+
+Ansible lives in:
+
+```bash
+source ~/.venvs/ansible/bin/activate
+```
+
+The environment uses `amazon.aws`, `boto3`, and `botocore`.
+
+The Makefile invokes `~/.venvs/ansible/bin/ansible*` directly, so activating the virtualenv is optional when using `make`.
+
+## Terraform and VM
+
+```bash
+make init
+make fmt
+make validate
+make plan
+make apply
+
+make vm-start
+make vm-info
+make vm-check
+```
+
+Terraform generates:
 
 ```text
 ansible/inventories/generated/hosts.ini
@@ -251,241 +240,259 @@ Validate connectivity:
 make ansible-ping
 ```
 
-For existing infrastructure:
-
-```ini
-[app_servers]
-app01 ansible_host=10.10.20.15 ansible_user=ansible ansible_port=22
-app02 ansible_host=10.10.20.16 ansible_user=ansible ansible_port=22
-```
-
-Then:
+Use existing infrastructure by overriding the inventory:
 
 ```bash
-make ansible-ping \
-  ANSIBLE_INVENTORY=/path/to/customer/hosts.ini
+make ansible-ping ANSIBLE_INVENTORY=/path/to/customer/hosts.ini
 ```
 
-The Ansible roles do not change.
-
-## Safe Execution on Existing Servers
-
-Before applying automation to an existing server, review what the playbook contains and what it would change.
-
-List tasks without executing them:
+## Server Setup
 
 ```bash
-ansible-playbook \
-  ansible/playbooks/setup.yml \
-  --list-tasks
+make ansible-setup
 ```
 
-Simulate changes:
+Best-effort setup check mode:
 
 ```bash
-ansible-playbook \
-  ansible/playbooks/setup.yml \
-  --check \
-  --diff
+make ansible-setup-check
 ```
 
-Limit the dry-run to one host:
-
-```bash
-ansible-playbook \
-  ansible/playbooks/setup.yml \
-  --check \
-  --diff \
-  --limit app01
-```
-
-For additional control:
-
-```bash
-ansible-playbook \
-  ansible/playbooks/setup.yml \
-  --check \
-  --diff \
-  --step \
-  --limit app01
-```
-
-`--list-tasks` does not execute the playbook against the target.
-
-`--check` connects to the server and evaluates supported tasks without applying their changes.
-
-Custom `command`, `shell`, or external scripts must be reviewed carefully because not every operation can be perfectly simulated in check mode.
-
-## Idempotency
-
-The desired behavior is convergence.
-
-If the target already satisfies a task, Ansible reports:
+Current runtime:
 
 ```text
-ok
-```
-
-If a change is required, it reports:
-
-```text
-changed
-```
-
-For example:
-
-```yaml
-- name: Install Java 21
-  ansible.builtin.apt:
-    name: openjdk-21-jdk
-    state: present
-```
-
-If Java 21 is already installed, the task remains `ok`.
-
-If it is missing, the task becomes `changed`.
-
-A standard idempotency test is:
-
-```bash
-ansible-playbook ansible/playbooks/setup.yml
-ansible-playbook ansible/playbooks/setup.yml
-```
-
-The second execution should ideally end with:
-
-```text
-changed=0
-failed=0
-```
-
-or only known, expected changes.
-
-This is particularly important when the automation is applied to existing customer infrastructure.
-
-## Java
-
-Java 21 is installed through the `java` Ansible role.
-
-## Tomcat
-
-Apache Tomcat is installed from the official binary archive instead of the operating system package repository.
-
-Current lab version:
-
-```text
-Apache Tomcat 11.0.25
+Ubuntu 24.04
 Java 21
+Apache Tomcat 11.0.25
 ```
 
-Installation layout:
+## LocalStack
+
+LocalStack provides S3 and Secrets Manager at `http://localhost:4566`.
+
+```bash
+make localstack-health
+make s3-ls
+make secrets-ls
+```
+
+Terraform creates the secret resource but does not manage its value.
+
+Example:
+
+```bash
+AWS_ACCESS_KEY_ID=test \
+AWS_SECRET_ACCESS_KEY=test \
+AWS_DEFAULT_REGION=us-east-1 \
+aws --endpoint-url=http://localhost:4566 \
+  secretsmanager put-secret-value \
+  --secret-id legacy-tomcat-demo/qa/application \
+  --secret-string '{"db_username":"legacy_user","db_password":"change-me"}'
+```
+
+For a real environment, use the organization's approved secret injection process instead of a literal command-line value.
+
+## CI/CD with Gitea Actions
+
+Gitea simulates an internal CI platform. The same design can be implemented with GitHub Actions, GitLab CI, Jenkins, Azure DevOps, or another CI system.
+
+### Application release
+
+A tag such as `v2.0.4` publishes:
 
 ```text
-/opt/tomcat/
-├── apache-tomcat-11.0.25/
-└── current -> apache-tomcat-11.0.25
+s3://legacy-artifacts/legacy-tomcat-demo/2.0.4/
+├── legacy-tomcat-demo.war
+└── legacy-tomcat-demo.war.sha256
 ```
 
-Tomcat runs as a dedicated `tomcat` user through systemd.
+```bash
+make app-artifacts APP_VERSION=2.0.4
+```
 
-## S3 Artifact Repository
+### Configuration release
 
-Application artifacts will use versioned paths:
+A tag such as `v1.0.2` publishes:
 
 ```text
-s3://legacy-artifacts/
-└── legacy-tomcat-demo/
-    ├── 1.0.0/
-    │   ├── legacy-tomcat-demo.war
-    │   └── legacy-tomcat-demo.war.sha256
-    └── 1.1.0/
-        ├── legacy-tomcat-demo.war
-        └── legacy-tomcat-demo.war.sha256
+s3://legacy-artifacts/legacy-tomcat-demo-config/1.0.2/
+├── config.tar.gz
+└── config.tar.gz.sha256
 ```
 
-## Configuration Repository
-
-Configuration is versioned separately from the WAR:
-
-```text
-legacy-tomcat-demo-config/
-└── environments/
-    ├── dev/
-    │   └── application.properties.j2
-    ├── qa/
-    │   └── application.properties.j2
-    └── prod/
-        └── application.properties.j2
+```bash
+make config-artifacts CONFIG_VERSION=1.0.2
 ```
 
-Sensitive values remain placeholders:
+Templates retain secret placeholders:
 
 ```properties
 spring.datasource.username={{ app_secrets.db_username }}
 spring.datasource.password={{ app_secrets.db_password }}
+application.environment={{ app_environment }}
+application.version={{ app_version }}
 ```
 
-## Secrets
+The rendered `application.properties` exists only on the target server.
 
-Terraform creates the Secrets Manager resource but does not manage the actual secret value.
+## Deployment
 
-The application deployment will resolve secrets at runtime and normalize them into a common structure such as:
-
-```yaml
-app_secrets:
-  db_username: ""
-  db_password: ""
-```
-
-## Planned Deployment Flow
-
-```text
-Application version
-        |
-        v
-Download WAR from S3
-        |
-        v
-Verify SHA-256
-        |
-        v
-Checkout config version from Git
-        |
-        v
-Resolve secrets
-        |
-        v
-Render application.properties
-        |
-        v
-Backup current deployment
-        |
-        v
-Deploy configuration + WAR
-        |
-        v
-Restart Tomcat only if needed
-        |
-        v
-Health check
-        |
-        +--> Success
-        |
-        └--> Failure -> Rollback
-```
-
-The target deployment command will eventually look similar to:
+The deployment requires `app_version`, `config_version`, and `app_environment`.
 
 ```bash
-ansible-playbook \
-  ansible/playbooks/deploy.yml \
-  -e environment=qa \
-  -e app_version=1.0.0 \
-  -e config_version=v1.0.0
+make deploy \
+  APP_VERSION=2.0.4 \
+  CONFIG_VERSION=1.0.2 \
+  APP_ENV=qa
 ```
+
+Flow:
+
+```text
+Secrets Manager
+      |
+Download WAR + checksum
+      |
+Verify SHA-256
+      |
+Download config + checksum
+      |
+Verify SHA-256
+      |
+Extract environment template
+      |
+Render /opt/legacy-demo/config/application.properties
+      |
+Render Tomcat setenv.sh
+      |
+Compare desired and deployed WAR
+      |
+      +---------------------------+
+      |                           |
+    changed                    unchanged
+      |                           |
+Stop Tomcat                      |
+Copy WAR                         |
+Remove exploded app              |
+Clear app work cache             |
+Start Tomcat                     |
+      |                           |
+      +-------------+-------------+
+                    |
+        restart only if config/setenv changed
+                    |
+             health check -> UP
+```
+
+Tomcat `setenv.sh` exposes:
+
+```bash
+export SPRING_CONFIG_ADDITIONAL_LOCATION="file:/opt/legacy-demo/config/"
+```
+
+## Controlled Tomcat Changes
+
+| Change | Tomcat behavior |
+| --- | --- |
+| WAR changed | Stop -> deploy -> remove exploded app/work cache -> start |
+| Only config or `setenv.sh` changed | Restart |
+| Nothing changed | No restart |
+
+The application-specific work cache is:
+
+```text
+/opt/tomcat/current/work/Catalina/localhost/legacy-tomcat-demo
+```
+
+## Health Check and Idempotency
+
+The deployment waits for:
+
+```text
+GET /legacy-tomcat-demo/actuator/health
+```
+
+A validated run returned:
+
+```text
+Application deployed successfully
+Application version: 2.0.4
+Configuration version: 1.0.2
+Environment: qa
+Health status: UP
+```
+
+Running the same deployment again produced no Tomcat restart:
+
+```text
+WAR changed: false
+Configuration changed: false
+Tomcat environment changed: false
+```
+
+## Useful Make Targets
+
+```bash
+make init
+make fmt
+make validate
+make plan
+make apply
+
+make localstack-health
+make s3-ls
+make secrets-ls
+
+make vm-start
+make vm-info
+make vm-check
+
+make ansible-ping
+make ansible-setup
+make ansible-setup-check
+
+make app-artifacts APP_VERSION=2.0.4
+make config-artifacts CONFIG_VERSION=1.0.2
+
+make deploy APP_VERSION=2.0.4 CONFIG_VERSION=1.0.2 APP_ENV=qa
+make tomcat-status
+
+make gitea-logs
+make runner-logs
+```
+
+## Current Status
+
+Completed:
+
+- [x] Terraform local infrastructure
+- [x] Multipass compute abstraction
+- [x] cloud-init bootstrap
+- [x] generated and existing inventory modes
+- [x] Java 21 automation
+- [x] Apache Tomcat 11.0.25 automation
+- [x] LocalStack S3 and Secrets Manager
+- [x] local Gitea and Actions runner
+- [x] application CI release pipeline
+- [x] configuration CI release pipeline
+- [x] versioned WAR/config + SHA-256 publication
+- [x] runtime secret resolution
+- [x] external `application.properties` rendering
+- [x] Tomcat `setenv.sh`
+- [x] controlled WAR deployment
+- [x] application-specific work-cache cleanup
+- [x] conditional Tomcat restart
+- [x] health check
+- [x] deployment idempotency verified
+
+Next:
+
+- [ ] persist LocalStack state across container recreation
+- [ ] add automatic rollback on failed health checks
+- [ ] optionally add deployment from CI/CD
+- [ ] test the same Ansible roles against another infrastructure provider
+- [ ] write the final blog article
 
 ## Goal
 
-The application can remain a traditional Java WAR deployed to Tomcat while its delivery process becomes versioned, repeatable, automated, safer to operate, and independent from the infrastructure provider.
-
-> Legacy application does not have to mean legacy delivery process.
+The application remains a traditional Java WAR deployed to Apache Tomcat, but the delivery process is now versioned, reproducible, integrity-checked, secret-aware, automated, health-validated, idempotent, and independent from the infrastructure provider.

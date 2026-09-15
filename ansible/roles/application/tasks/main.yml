@@ -1,0 +1,363 @@
+---
+#
+# Load deployment secrets.
+#
+
+- name: Load application secrets from Secrets Manager
+  ansible.builtin.set_fact:
+    app_secrets: >-
+      {{
+        lookup(
+          'amazon.aws.secretsmanager_secret',
+          secret_name,
+          endpoint_url=artifact_endpoint_url,
+          region=aws_region
+        ) | from_json
+      }}
+  no_log: true
+
+- name: Validate application secrets
+  ansible.builtin.assert:
+    that:
+      - app_secrets is defined
+      - app_secrets is mapping
+      - app_secrets.db_username is defined
+      - app_secrets.db_password is defined
+    fail_msg: "Required application secrets were not found."
+    success_msg: "Application secrets loaded successfully."
+  no_log: true
+
+- name: Display deployment plan
+  ansible.builtin.debug:
+    msg:
+      - "Application: {{ app_name }}"
+      - "Application version: {{ app_version }}"
+      - "Configuration version: {{ config_version }}"
+      - "Environment: {{ app_environment }}"
+      - "Secrets loaded: yes"
+
+#
+# Download and verify application artifact.
+#
+
+- name: Create controller release directory
+  ansible.builtin.file:
+    path: "{{ controller_release_dir }}"
+    state: directory
+    mode: "0755"
+  delegate_to: localhost
+  become: false
+
+- name: Download application WAR from S3
+  amazon.aws.s3_object:
+    bucket: "{{ artifact_bucket }}"
+    object: "{{ app_artifact_key }}"
+    dest: "{{ controller_war_path }}"
+    mode: get
+    endpoint_url: "{{ artifact_endpoint_url }}"
+    region: "{{ aws_region }}"
+    overwrite: always
+  delegate_to: localhost
+  become: false
+
+- name: Download application SHA256 from S3
+  amazon.aws.s3_object:
+    bucket: "{{ artifact_bucket }}"
+    object: "{{ app_checksum_key }}"
+    dest: "{{ controller_checksum_path }}"
+    mode: get
+    endpoint_url: "{{ artifact_endpoint_url }}"
+    region: "{{ aws_region }}"
+    overwrite: always
+  delegate_to: localhost
+  become: false
+
+- name: Calculate downloaded WAR SHA256
+  ansible.builtin.stat:
+    path: "{{ controller_war_path }}"
+    checksum_algorithm: sha256
+  register: downloaded_war
+  delegate_to: localhost
+  become: false
+
+- name: Read expected WAR SHA256
+  ansible.builtin.slurp:
+    src: "{{ controller_checksum_path }}"
+  register: expected_war_checksum
+  delegate_to: localhost
+  become: false
+
+- name: Verify WAR SHA256
+  ansible.builtin.assert:
+    that:
+      - downloaded_war.stat.checksum == (expected_war_checksum.content | b64decode | trim)
+    fail_msg: "WAR SHA256 verification failed."
+    success_msg: "WAR SHA256 verification passed."
+
+#
+# Download and verify configuration artifact.
+#
+
+- name: Create controller configuration release directory
+  ansible.builtin.file:
+    path: "{{ controller_config_release_dir }}"
+    state: directory
+    mode: "0755"
+  delegate_to: localhost
+  become: false
+
+- name: Download configuration bundle from S3
+  amazon.aws.s3_object:
+    bucket: "{{ artifact_bucket }}"
+    object: "{{ config_artifact_key }}"
+    dest: "{{ controller_config_archive_path }}"
+    mode: get
+    endpoint_url: "{{ artifact_endpoint_url }}"
+    region: "{{ aws_region }}"
+    overwrite: always
+  delegate_to: localhost
+  become: false
+
+- name: Download configuration SHA256 from S3
+  amazon.aws.s3_object:
+    bucket: "{{ artifact_bucket }}"
+    object: "{{ config_checksum_key }}"
+    dest: "{{ controller_config_checksum_path }}"
+    mode: get
+    endpoint_url: "{{ artifact_endpoint_url }}"
+    region: "{{ aws_region }}"
+    overwrite: always
+  delegate_to: localhost
+  become: false
+
+- name: Calculate configuration bundle SHA256
+  ansible.builtin.stat:
+    path: "{{ controller_config_archive_path }}"
+    checksum_algorithm: sha256
+  register: downloaded_config
+  delegate_to: localhost
+  become: false
+
+- name: Read expected configuration SHA256
+  ansible.builtin.slurp:
+    src: "{{ controller_config_checksum_path }}"
+  register: expected_config_checksum
+  delegate_to: localhost
+  become: false
+
+- name: Verify configuration bundle SHA256
+  ansible.builtin.assert:
+    that:
+      - downloaded_config.stat.checksum == (expected_config_checksum.content | b64decode | trim)
+    fail_msg: "Configuration SHA256 verification failed."
+    success_msg: "Configuration SHA256 verification passed."
+
+#
+# Extract configuration release.
+#
+
+- name: Create configuration extraction directory
+  ansible.builtin.file:
+    path: "{{ controller_config_extract_dir }}"
+    state: directory
+    mode: "0755"
+  delegate_to: localhost
+  become: false
+
+- name: Extract configuration bundle
+  ansible.builtin.unarchive:
+    src: "{{ controller_config_archive_path }}"
+    dest: "{{ controller_config_extract_dir }}"
+    remote_src: true
+    creates: "{{ config_template_path }}"
+  delegate_to: localhost
+  become: false
+
+- name: Check environment configuration template
+  ansible.builtin.stat:
+    path: "{{ config_template_path }}"
+  register: config_template
+  delegate_to: localhost
+  become: false
+
+- name: Validate environment configuration template
+  ansible.builtin.assert:
+    that:
+      - config_template.stat.exists
+      - config_template.stat.isreg
+    fail_msg: >-
+      Configuration template for environment
+      {{ app_environment }} was not found.
+    success_msg: >-
+      Configuration template for {{ app_environment }} found.
+
+#
+# Prepare application directories and configuration.
+#
+
+- name: Create application directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: tomcat
+    group: tomcat
+    mode: "0750"
+  loop:
+    - "{{ app_install_dir }}"
+    - "{{ app_config_dir }}"
+    - "{{ app_data_dir }}"
+
+- name: Validate secrets before rendering configuration
+  ansible.builtin.assert:
+    that:
+      - app_secrets is defined
+      - app_secrets is mapping
+      - app_secrets.db_username is defined
+      - app_secrets.db_password is defined
+    fail_msg: "Application secrets are not available for configuration rendering."
+    success_msg: "Application secrets are available for configuration rendering."
+  no_log: true
+
+- name: Render application configuration
+  ansible.builtin.template:
+    src: "{{ config_template_path }}"
+    dest: "{{ app_config_dir }}/application.properties"
+    owner: tomcat
+    group: tomcat
+    mode: "0640"
+  register: application_config
+  no_log: true
+
+- name: Check rendered application configuration
+  ansible.builtin.stat:
+    path: "{{ app_config_dir }}/application.properties"
+  register: rendered_config
+
+- name: Validate rendered application configuration
+  ansible.builtin.assert:
+    that:
+      - rendered_config.stat.exists
+      - rendered_config.stat.isreg
+      - rendered_config.stat.pw_name == 'tomcat'
+      - rendered_config.stat.gr_name == 'tomcat'
+    fail_msg: "Rendered application configuration is invalid."
+    success_msg: "Application configuration rendered successfully."
+
+- name: Configure Tomcat application environment
+  ansible.builtin.template:
+    src: setenv.sh.j2
+    dest: /opt/tomcat/current/bin/setenv.sh
+    owner: tomcat
+    group: tomcat
+    mode: "0750"
+  register: tomcat_environment
+
+#
+# Determine whether the WAR really changed.
+#
+
+- name: Check currently deployed WAR
+  ansible.builtin.stat:
+    path: "{{ tomcat_webapps_dir }}/{{ app_name }}.war"
+    checksum_algorithm: sha256
+  register: deployed_war
+
+- name: Determine whether application WAR changed
+  ansible.builtin.set_fact:
+    war_changed: >-
+      {{
+        (not deployed_war.stat.exists)
+        or
+        (
+          (deployed_war.stat.checksum | default(''))
+          != downloaded_war.stat.checksum
+        )
+      }}
+
+- name: Display deployment changes
+  ansible.builtin.debug:
+    msg:
+      - "WAR changed: {{ war_changed }}"
+      - "Configuration changed: {{ application_config.changed }}"
+      - "Tomcat environment changed: {{ tomcat_environment.changed }}"
+
+#
+# Controlled WAR deployment.
+#
+
+- name: Stop Tomcat before replacing WAR
+  ansible.builtin.systemd:
+    name: tomcat
+    state: stopped
+  when: war_changed
+
+- name: Deploy application WAR to Tomcat
+  ansible.builtin.copy:
+    src: "{{ controller_war_path }}"
+    dest: "{{ tomcat_webapps_dir }}/{{ app_name }}.war"
+    owner: tomcat
+    group: tomcat
+    mode: "0640"
+  when: war_changed
+
+- name: Remove previously exploded application
+  ansible.builtin.file:
+    path: "{{ tomcat_webapps_dir }}/{{ app_name }}"
+    state: absent
+  when: war_changed
+
+- name: Clear Tomcat application work cache
+  ansible.builtin.file:
+    path: "{{ tomcat_work_dir }}/{{ app_name }}"
+    state: absent
+  when: war_changed
+
+#
+# Start/restart Tomcat only when required.
+#
+
+- name: Start Tomcat after WAR deployment
+  ansible.builtin.systemd:
+    name: tomcat
+    state: started
+  when: war_changed
+
+- name: Restart Tomcat after configuration change
+  ansible.builtin.systemd:
+    name: tomcat
+    state: restarted
+  when:
+    - not war_changed
+    - application_config.changed or tomcat_environment.changed
+
+- name: Ensure Tomcat is running
+  ansible.builtin.systemd:
+    name: tomcat
+    state: started
+
+#
+# Validate deployment.
+#
+
+- name: Wait for application health endpoint
+  ansible.builtin.uri:
+    url: "http://localhost:8080/{{ app_name }}/actuator/health"
+    method: GET
+    status_code: 200
+    return_content: true
+  register: application_health
+  retries: 20
+  delay: 3
+  until: >-
+    (application_health.status | default(0) == 200)
+    and
+    (application_health.json.status | default('') == 'UP')
+
+- name: Display deployment result
+  ansible.builtin.debug:
+    msg:
+      - "Application deployed successfully"
+      - "Application version: {{ app_version }}"
+      - "Configuration version: {{ config_version }}"
+      - "Environment: {{ app_environment }}"
+      - "Health status: {{ application_health.json.status }}"

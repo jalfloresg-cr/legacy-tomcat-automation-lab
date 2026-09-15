@@ -37,3 +37,9 @@ variable "ssh_private_key_path" {
   type    = string
   default = "~/.ssh/id_ed25519"
 }
+
+
+variable "gitea_version" {
+  type    = string
+  default = "1.27.3"
+}

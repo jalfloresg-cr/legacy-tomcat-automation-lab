@@ -1,0 +1,10 @@
+runner:
+  capacity: 1
+  timeout: 1h
+
+cache:
+  enabled: false
+
+container:
+  network: legacy-lab-gitea
+  privileged: false

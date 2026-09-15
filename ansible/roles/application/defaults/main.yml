@@ -1,0 +1,41 @@
+---
+app_name: legacy-tomcat-demo
+config_name: legacy-tomcat-demo-config
+
+artifact_bucket: legacy-artifacts
+artifact_endpoint_url: http://localhost:4566
+aws_region: us-east-1
+
+environment: qa
+
+secret_name: "{{ app_name }}/{{ app_environment }}/application"
+
+controller_release_dir: "/tmp/{{ app_name }}-deploy"
+
+app_install_dir: /opt/legacy-demo
+app_config_dir: "{{ app_install_dir }}/config"
+app_data_dir: "{{ app_install_dir }}/data"
+
+tomcat_webapps_dir: /opt/tomcat/current/webapps
+
+
+app_artifact_key: "{{ app_name }}/{{ app_version }}/{{ app_name }}.war"
+app_checksum_key: "{{ app_artifact_key }}.sha256"
+
+controller_release_dir: "/tmp/{{ app_name }}-deploy/{{ app_version }}"
+controller_war_path: "{{ controller_release_dir }}/{{ app_name }}.war"
+controller_checksum_path: "{{ controller_war_path }}.sha256"
+
+
+config_artifact_key: "{{ config_name }}/{{ config_version }}/config.tar.gz"
+config_checksum_key: "{{ config_artifact_key }}.sha256"
+
+controller_config_release_dir: "/tmp/{{ app_name }}-deploy/config/{{ config_version }}"
+controller_config_archive_path: "{{ controller_config_release_dir }}/config.tar.gz"
+controller_config_checksum_path: "{{ controller_config_archive_path }}.sha256"
+controller_config_extract_dir: "{{ controller_config_release_dir }}/extracted"
+
+config_template_path: >-
+  {{ controller_config_extract_dir }}/environments/{{ app_environment }}/application.properties.j2
+
+tomcat_work_dir: /opt/tomcat/current/work/Catalina/localhost  

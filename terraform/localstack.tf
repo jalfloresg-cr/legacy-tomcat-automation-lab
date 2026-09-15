@@ -12,6 +12,10 @@ resource "docker_container" "localstack" {
     external = 4566
   }
 
+  networks_advanced {
+    name = docker_network.gitea.name
+  }
+
   env = [
     "SERVICES=s3,secretsmanager"
   ]
