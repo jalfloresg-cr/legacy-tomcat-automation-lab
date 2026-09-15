@@ -1,0 +1,29 @@
+TF_DIR := terraform
+LOCALSTACK_ENDPOINT := http://localhost:4566
+AWS_ENV := AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test AWS_DEFAULT_REGION=us-east-1
+
+.PHONY: init fmt validate plan apply destroy s3-ls secrets-ls
+
+init:
+	terraform -chdir=$(TF_DIR) init
+
+fmt:
+	terraform -chdir=$(TF_DIR) fmt
+
+validate:
+	terraform -chdir=$(TF_DIR) validate
+
+plan:
+	terraform -chdir=$(TF_DIR) plan
+
+apply:
+	terraform -chdir=$(TF_DIR) apply
+
+destroy:
+	terraform -chdir=$(TF_DIR) destroy
+
+s3-ls:
+	$(AWS_ENV) aws --endpoint-url=$(LOCALSTACK_ENDPOINT) s3 ls
+
+secrets-ls:
+	$(AWS_ENV) aws --endpoint-url=$(LOCALSTACK_ENDPOINT) secretsmanager list-secrets

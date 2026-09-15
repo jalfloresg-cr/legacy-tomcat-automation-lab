@@ -1,0 +1,37 @@
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+
+# Terraform local variables
+terraform.tfvars
+*.auto.tfvars
+
+# Terraform plans
+*.tfplan
+plan.out
+
+# Terraform CLI config
+.terraformrc
+terraform.rc
+
+# Generated lab files
+terraform/cloud-init.generated.yaml
+ansible/inventory/hosts.ini
+
+# Local secrets / env files
+.env
+*.secret
+*.key
+*.pem
+secrets/
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
