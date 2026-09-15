@@ -1,14 +1,24 @@
 TF_DIR := terraform
+VM_NAME := legacy-tomcat
+
+ANSIBLE_DIR := ansible
+ANSIBLE_INVENTORY := $(ANSIBLE_DIR)/inventory/hosts.ini
+
 LOCALSTACK_ENDPOINT := http://localhost:4566
 AWS_ENV := AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test AWS_DEFAULT_REGION=us-east-1
 
-.PHONY: init fmt validate plan apply destroy s3-ls secrets-ls
+.PHONY: \
+	init fmt validate plan apply destroy \
+	state providers \
+	s3-ls secrets-ls \
+	vm-list vm-info vm-cloud-init vm-user vm-python vm-check \
+	ansible-ping
 
 init:
 	terraform -chdir=$(TF_DIR) init
 
 fmt:
-	terraform -chdir=$(TF_DIR) fmt
+	terraform -chdir=$(TF_DIR) fmt -recursive
 
 validate:
 	terraform -chdir=$(TF_DIR) validate
@@ -22,8 +32,41 @@ apply:
 destroy:
 	terraform -chdir=$(TF_DIR) destroy
 
+state:
+	terraform -chdir=$(TF_DIR) state list
+
+providers:
+	terraform -chdir=$(TF_DIR) providers
+
 s3-ls:
-	$(AWS_ENV) aws --endpoint-url=$(LOCALSTACK_ENDPOINT) s3 ls
+	$(AWS_ENV) aws \
+		--endpoint-url=$(LOCALSTACK_ENDPOINT) \
+		s3 ls
 
 secrets-ls:
-	$(AWS_ENV) aws --endpoint-url=$(LOCALSTACK_ENDPOINT) secretsmanager list-secrets
+	$(AWS_ENV) aws \
+		--endpoint-url=$(LOCALSTACK_ENDPOINT) \
+		secretsmanager list-secrets
+
+vm-list:
+	multipass list
+
+vm-info:
+	multipass info $(VM_NAME)
+
+vm-cloud-init:
+	multipass exec $(VM_NAME) -- cloud-init status --wait
+
+vm-user:
+	multipass exec $(VM_NAME) -- id ansible
+
+vm-python:
+	multipass exec $(VM_NAME) -- python3 --version
+
+vm-check: vm-list vm-cloud-init vm-user vm-python
+
+ansible-ping:
+	ansible \
+		-i $(ANSIBLE_INVENTORY) \
+		app_servers \
+		-m ping
