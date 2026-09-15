@@ -1,5 +1,5 @@
 resource "local_file" "ansible_inventory" {
-  filename = "${path.root}/../ansible/inventory/hosts.ini"
+  filename = "${path.root}/../ansible/inventories/generated/hosts.ini"
 
   content = templatefile(
     "${path.root}/templates/hosts.ini.tftpl",

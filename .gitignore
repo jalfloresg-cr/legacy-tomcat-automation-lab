@@ -19,7 +19,7 @@ terraform.rc
 
 # Generated lab files
 terraform/cloud-init.generated.yaml
-ansible/inventory/hosts.ini
+ansible/inventories/generated/hosts.ini
 
 # Local secrets / env files
 .env

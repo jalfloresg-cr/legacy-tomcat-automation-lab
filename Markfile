@@ -2,7 +2,8 @@ TF_DIR := terraform
 VM_NAME := legacy-tomcat
 
 ANSIBLE_DIR := ansible
-ANSIBLE_INVENTORY := $(ANSIBLE_DIR)/inventory/hosts.ini
+ANSIBLE_GENERATED_INVENTORY := $(ANSIBLE_DIR)/inventories/generated/hosts.ini
+ANSIBLE_INVENTORY ?= $(ANSIBLE_GENERATED_INVENTORY)
 
 LOCALSTACK_ENDPOINT := http://localhost:4566
 AWS_ENV := AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test AWS_DEFAULT_REGION=us-east-1
