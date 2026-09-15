@@ -5,7 +5,7 @@ locals {
 }
 
 resource "local_file" "cloud_init" {
-  filename = "${path.module}/cloud-init.generated.yaml"
+  filename = var.cloud_init_output_path
 
   content = templatefile(
     "${path.module}/templates/cloud-init.yaml.tftpl",
@@ -49,5 +49,20 @@ resource "terraform_data" "multipass_vm" {
 
   depends_on = [
     local_file.cloud_init
+  ]
+}
+
+data "external" "multipass_info" {
+  program = [
+    "python3",
+    "${path.module}/scripts/multipass_info.py"
+  ]
+
+  query = {
+    name = var.vm_name
+  }
+
+  depends_on = [
+    terraform_data.multipass_vm
   ]
 }
